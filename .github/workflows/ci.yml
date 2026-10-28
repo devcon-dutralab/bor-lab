@@ -35,7 +35,7 @@ jobs:
       - name: Beacon scoreboard
         if: always()
         env:
-          SCOREBOARD_TOKEN: ${{ secrets.REVIEW_BOT_TOKEN }}
+          SCOREBOARD_TOKEN: ${{ secrets.SCOREBOARD_TOKEN }}
           SCOREBOARD_URL: ${{ vars.SCOREBOARD_URL }}
           TEAM: ${{ github.event.repository.name }}
           KIND: ci

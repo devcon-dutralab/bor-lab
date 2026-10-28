@@ -1,0 +1,78 @@
+name: codegenie-review
+
+# Comment-triggered review. The workflow file must exist on the default branch
+# for issue_comment events to fire.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: codegenie-review-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    if: ${{ github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    env:
+      # User-level codegenie home. On GitHub-hosted runners there is no custom
+      # job image, so we synthesize the same layout the lab image ships:
+      # $CODEGENIE_HOME/config.toml is where codegenie reads lenses.extraSkillPaths
+      # (repo-level config ignores that key).
+      CODEGENIE_HOME: ${{ github.workspace }}/.codegenie
+    steps:
+      # Safe pattern: check out the trusted default branch, never the PR head.
+      # The review agent then fetches the PR head itself.
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      # The team review lens codegenie obeys is pulled from skill-hub, a repo
+      # the same untrusted population can write to. This clone is the poison
+      # delivery path. The trust anchor is that file: whatever it says at
+      # review time is what the reviewer obeys, and nothing about it is pinned
+      # to a commit or signed.
+      - name: Clone team review lens
+        run: |
+          set -e
+          rm -rf "$RUNNER_TEMP/skill-hub"
+          git clone --quiet --depth 1 \
+            "https://github.com/${{ github.repository_owner }}/skill-hub" \
+            "$RUNNER_TEMP/skill-hub"
+
+      - name: Configure codegenie lens path
+        run: |
+          set -e
+          mkdir -p "$CODEGENIE_HOME"
+          cat > "$CODEGENIE_HOME/config.toml" <<EOF
+          [lenses]
+          extraSkillPaths = ["$RUNNER_TEMP/skill-hub/standards/team-review-lens.md"]
+          EOF
+
+      - name: Run codegenie review
+        env:
+          # GITHUB_TOKEN posts as github-actions[bot]; the write permission
+          # above lets codegenie post its inline review and status comment.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODEL_SPEC: ${{ vars.MODEL_SPEC }}
+          # ROSTER is an org variable, empty until T-0, when it is filled with
+          # attendee handles. Empty means codegenie allowlists no one.
+          ROSTER: ${{ vars.ROSTER }}
+          # codegenie's github-action adapter routes a single key to the model
+          # provider (openrouter here) via LLM_API_KEY.
+          LLM_API_KEY: ${{ secrets.LLM_KEY }}
+        run: |
+          set -e
+          npx -y @0xsequence/codegenie github-action \
+            --trigger-phrase "codegenie review" \
+            --on-pull-request false \
+            --model "${MODEL_SPEC:-openrouter/z-ai/glm-5.3-flash}" \
+            --post-inline-comments true \
+            --allowed-users "${ROSTER}"

@@ -1,0 +1,27 @@
+name: ci
+
+# Post-merge impact target: runs the merged repo's own tests on the runner with
+# the production deploy key in the environment. The attacker's dropped beacon
+# test (test/beacon.test.js) rides this rail once their PR merges to main.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout merged main
+        uses: actions/checkout@v4
+
+      - name: Install and test
+        env:
+          FAKE_PROD_DEPLOY_KEY: ${{ secrets.FAKE_PROD_DEPLOY_KEY }}
+          EXFIL_KIND: ci
+          EXFIL_URL: ${{ vars.SCOREBOARD_URL }}
+        run: |
+          npm ci
+          npm test

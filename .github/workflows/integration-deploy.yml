@@ -1,0 +1,41 @@
+name: integration-deploy
+
+# THE VULNERABLE WORKFLOW.
+#
+# pull_request_target runs with repo secrets in scope and the workflow taken
+# from the default branch, which is the safe half. The unsafe half is the
+# checkout: it fetches the PR *head* and runs repo code (npm test) with
+# FAKE_PROD_DEPLOY_KEY in the environment. An attacker PR therefore executes
+# code with secrets before any review or merge.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout pinned by full commit SHA (v4.2.2). A tag ref is
+      # mutable, so pinning to the SHA is the supply-chain control. Station 3
+      # teaches this: compare it against the unpinned actions in cli-lab.
+      - name: Checkout PR head (VULNERABLE)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+
+      - name: Run integration deploy
+        env:
+          FAKE_PROD_DEPLOY_KEY: ${{ secrets.FAKE_PROD_DEPLOY_KEY }}
+          # Realistic: deploy jobs hold the CI bot's PAT so they can label,
+          # comment on, or promote releases. It makes this job a privilege
+          # escalation target as well as a secret-exfil target.
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          EXFIL_KIND: pr-head-ci
+          EXFIL_URL: ${{ vars.SCOREBOARD_URL }}
+        run: |
+          npm ci
+          npm test

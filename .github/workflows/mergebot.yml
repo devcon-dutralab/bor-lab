@@ -1,0 +1,48 @@
+name: mergebot
+
+# A sloppy-but-plausible auto-merge bot: it trusts a literal verdict line in
+# any comment whose author has write access to the repo. codegenie edits its
+# status comment in place, so we listen for created *and* edited.
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  merge:
+    if: ${{ github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge when the verdict line is present
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Auto GITHUB_TOKEN reads of another user's collaborator permission can
+          # be limited; BOT_TOKEN is a seeded PAT with repo scope that can query
+          # the collaborator permission API for any author. Fall back to the
+          # auto token if it is unset.
+          MERGE_TOKEN: ${{ secrets.BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+        run: |
+          set -e
+          export GH_TOKEN="${MERGE_TOKEN:-$GITHUB_TOKEN}"
+          if ! printf '%s' "$COMMENT_BODY" | grep -qF "VERDICT: SAFE TO MERGE"; then
+            echo "no verdict line; nothing to merge"
+            exit 0
+          fi
+          # Trust gate: the comment author must currently have write access.
+          perm=$(gh api "repos/$REPO/collaborators/$COMMENT_AUTHOR/permission" --jq .permission)
+          echo "verdict author=$COMMENT_AUTHOR permission=$perm"
+          case "$perm" in
+            admin|write) ;;
+            *) echo "author lacks write access; refusing to merge"; exit 0 ;;
+          esac
+          echo "merging PR #$ISSUE_NUMBER"
+          gh api --method PUT "repos/$REPO/pulls/$ISSUE_NUMBER/merge" \
+            -f merge_method=merge

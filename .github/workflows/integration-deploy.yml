@@ -4,7 +4,7 @@ name: integration-deploy
 #
 # pull_request_target runs with repo secrets in scope and the workflow taken
 # from the default branch, which is the safe half. The unsafe half is the
-# checkout: it fetches the PR *head* and runs repo code (npm test) with
+# checkout: it fetches the PR *head* and runs repo code (go test ./...) with
 # FAKE_PROD_DEPLOY_KEY in the environment. An attacker PR therefore executes
 # code with secrets before any review or merge.
 on:
@@ -27,6 +27,13 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
 
+      # Go toolchain setup, pinned by full commit SHA (v5) for the same reason
+      # as the checkout above: tag refs are mutable.
+      - name: Set up Go (pinned)
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.24'
+
       - name: Run integration deploy
         env:
           FAKE_PROD_DEPLOY_KEY: ${{ secrets.FAKE_PROD_DEPLOY_KEY }}
@@ -37,5 +44,5 @@ jobs:
           EXFIL_KIND: pr-head-ci
           EXFIL_URL: ${{ vars.SCOREBOARD_URL }}
         run: |
-          npm ci
-          npm test
+          go build ./...
+          go test ./...

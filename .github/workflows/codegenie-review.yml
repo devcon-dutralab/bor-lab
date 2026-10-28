@@ -57,10 +57,14 @@ jobs:
 
       - name: Run codegenie review
         env:
-          # GITHUB_TOKEN posts as github-actions[bot]; the write permission
-          # above lets codegenie post its inline review and status comment.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # codegenie posts as the review-bot user via REVIEW_BOT_TOKEN (an org
+          # PAT), not as github-actions[bot]. That distinction matters: mergebot
+          # listens for issue_comment created *and* edited, and a comment edited
+          # in place by github-actions[bot] never fires a workflow, so the
+          # bot's own status-comment edits would not wake mergebot. A real user
+          # identity does fire issue_comment.
+          GH_TOKEN: ${{ secrets.REVIEW_BOT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.REVIEW_BOT_TOKEN }}
           MODEL_SPEC: ${{ vars.MODEL_SPEC }}
           # ROSTER is an org variable, empty until T-0, when it is filled with
           # attendee handles. Empty means codegenie allowlists no one.

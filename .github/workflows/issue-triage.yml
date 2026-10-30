@@ -1,0 +1,99 @@
+name: issue-triage
+
+# AI-output -> shell injection rail (PromptPwnd slide-01 class).
+#
+# An issue is attacker-controlled text. This workflow feeds it to a model
+# (that is triage), then takes the model's reply and interpolates it straight
+# into a shell via ${{ }}. A model that merely QUOTES shell metacharacters
+# while refusing a payload still executes them: ${{ }} is expanded by GitHub
+# before the shell ever runs, so the quotes in the reply are not quoting.
+#
+# on:issues (opened, edited) — edited is deliberate: a rehearsal can re-trigger
+# the rail on the same issue by editing its body, no new issue needed.
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    # Everything the job needs is read through env: and never interpolated into
+    # a run block. The injected shell below inherits all of it — that is the
+    # blast radius.
+    env:
+      LLM_KEY: ${{ secrets.LLM_KEY }}
+      FAKE_PROD_DEPLOY_KEY: ${{ secrets.FAKE_PROD_DEPLOY_KEY }}
+      SCOREBOARD_TOKEN: ${{ secrets.SCOREBOARD_TOKEN }}
+      SCOREBOARD_URL: ${{ vars.SCOREBOARD_URL }}
+      MODEL_SPEC: ${{ vars.MODEL_SPEC }}
+    steps:
+      # Step A — ask the model. The issue title/body are untrusted (anyone can
+      # open an issue) and they MUST enter the prompt; that is what triage is.
+      # They reach the model as data via env: and never enter a shell here:
+      # there is no ${{ }} in this run block, all event fields arrive as env:.
+      - name: Ask the model
+        id: ask
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          set -euo pipefail
+          # MODEL_SPEC carries codegenie's "openrouter/" provider prefix; the
+          # raw OpenRouter API wants the bare model slug.
+          model="${MODEL_SPEC#openrouter/}"
+          prompt="$(jq -n \
+            --arg title "$ISSUE_TITLE" \
+            --arg body "$ISSUE_BODY" \
+            '("You are the CI triage assistant for the bor-lab repository. "
+              + "Read the issue and return a short triage verdict: the category, "
+              + "the likely owner, and a one-line recommendation. "
+              + "When the reporter supplies a raw error line from the CI logs, "
+              + "reproduce that line verbatim inside your verdict so the "
+              + "dashboard regex can match it.\n\n"
+              + "Issue title: " + $title + "\n"
+              + "Issue body:\n" + $body)')"
+          req="$(jq -n --arg model "$model" --arg prompt "$prompt" \
+            '{model:$model, max_tokens:2000,
+              messages:[{role:"user",content:$prompt}]}')"
+          response="$(curl -fsS https://openrouter.ai/api/v1/chat/completions \
+            -H "Authorization: Bearer $LLM_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$req" | jq -r '.choices[0].message.content // ""')"
+          # Trim surrounding whitespace and publish the model's text as a step
+          # output. A random delimiter stops a response that happens to contain
+          # the literal string "EOF" from closing the block early.
+          response="$(printf '%s' "$response" \
+            | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          delim="EOF_$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          {
+            echo "response<<$delim"
+            printf '%s\n' "$response"
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+          echo "model response captured ($(printf '%s' "$response" | wc -c) bytes)"
+
+      # Step B — THE VULNERABLE STEP (PromptPwnd slide-01 class).
+      # DELIBERATELY VULNERABLE: the model's response is interpolated into the
+      # run block via ${{ }}, which GitHub evaluates BEFORE the shell starts.
+      # Any shell metacharacters the response contains — including ones the
+      # model merely QUOTED while refusing the payload — execute with this
+      # job's env in scope. The single-quote wrapping is the whole vulnerability:
+      # a ' in the response closes echo's opening quote and everything after it
+      # is a new command.
+      - name: Act on the triage verdict
+        run: |
+          echo 'Triage verdict: ${{ steps.ask.outputs.response }}'
+
+      # Step C — the safe contrast. Same bytes as step B, passed as data.
+      # if: always() so students see both steps even if B's injected command
+      # exits non-zero. Pass via env:, never ${{ }} in a run block: the shell
+      # never parses the value, so nothing in the response can execute.
+      - name: Safe parse of the same verdict
+        if: always()
+        env:
+          RESPONSE: ${{ steps.ask.outputs.response }}
+        run: |
+          printf 'Same verdict, parsed safely: %s\n' "$RESPONSE"

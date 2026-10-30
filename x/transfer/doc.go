@@ -4,3 +4,5 @@
 package transfer
 
 // announce test
+
+// hardened announce test

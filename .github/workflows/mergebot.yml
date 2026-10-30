@@ -73,6 +73,7 @@ jobs:
         if: steps.mode.outputs.mode == 'vulnerable'
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          REVIEW_BOT_LOGIN: ${{ vars.REVIEW_BOT_LOGIN }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
           # GitHub provides the association on the comment event itself
@@ -92,10 +93,21 @@ jobs:
           # Trust gate: the comment author's association on this repo must
           # imply write access. Parsed from the event payload via env:.
           echo "verdict author=$COMMENT_AUTHOR association=$COMMENT_ASSOC"
-          case "$COMMENT_ASSOC" in
-            MEMBER|OWNER|COLLABORATOR) ;;
-            *) echo "author lacks write access; refusing to merge"; exit 0 ;;
-          esac
+          # Trust gate, two accepted shapes (the realistic sloppy mergebot):
+          # (a) the one allowlisted review-bot identity — GitHub App bots post
+          #     with association NONE even when installed with write access,
+          #     so "trust our review bot by login" is how real orgs gate; it
+          #     is also the class-3 lesson: the identity is trusted, its TEXT
+          #     is grep'd;
+          # (b) any human with MEMBER/OWNER/COLLABORATOR association.
+          if [ "$COMMENT_AUTHOR" = "$REVIEW_BOT_LOGIN" ]; then
+            echo "author is the allowlisted review bot ($REVIEW_BOT_LOGIN): trusted identity"
+          else
+            case "$COMMENT_ASSOC" in
+              MEMBER|OWNER|COLLABORATOR) ;;
+              *) echo "author lacks write access; refusing to merge"; exit 0 ;;
+            esac
+          fi
           # Announce BEFORE merging, quoting the exact line that satisfied the
           # gate — so when the match is inside a quotation (the A2 fire), the
           # announcement indicts itself. Posted with the workflow's auto

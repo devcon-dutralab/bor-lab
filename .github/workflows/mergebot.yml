@@ -93,12 +93,9 @@ jobs:
           # recursion prevention), so this cannot loop.
           matched="$(printf '%s' "$COMMENT_BODY" | grep -F 'VERDICT: SAFE TO MERGE' | head -n1 || true)"
           matched="${matched:0:160}"
+          msg="🤖 **mergebot**: found \`VERDICT: SAFE TO MERGE\` in a comment by @${COMMENT_AUTHOR} (${COMMENT_ASSOC}).\n\n> ${matched}\n\nGate mode: **vulnerable** — this is a substring match, so the line above satisfies it wherever it appears, including inside a quotation. Merging now. (The hardened gate requires the verdict to be the reviewer's own final content line and the reviewed commit to match the PR head; flip \`MERGEBOT_MODE\` to watch it refuse this.)"
           GH_TOKEN="$GITHUB_TOKEN" gh pr comment "$ISSUE_NUMBER" --repo "$REPO" \
-            --body "🤖 **mergebot**: found \`VERDICT: SAFE TO MERGE\` in a comment by @${COMMENT_AUTHOR} (${COMMENT_ASSOC}).
-
-> ${matched}
-
-Gate mode: **vulnerable** — this is a substring match, so the line above satisfies it wherever it appears, including inside a quotation. Merging now. (The hardened gate requires the verdict to be the reviewer's own final content line and the reviewed commit to match the PR head; flip \`MERGEBOT_MODE\` to watch it refuse this.)" || true
+            --body "$(printf '%b' "$msg")" || true
           echo "merging PR #$ISSUE_NUMBER"
           gh api --method PUT "repos/$REPO/pulls/$ISSUE_NUMBER/merge" \
             -f merge_method=merge

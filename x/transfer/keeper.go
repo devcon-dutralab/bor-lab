@@ -39,6 +39,13 @@ func (k *Keeper) Balance(addr string) int64 {
 	return k.balances[addr]
 }
 
+// MintTo credits amount to addr outside of a transfer. It backs the devnet
+// faucet and the post-spinup top-up tooling. Callers are expected to have
+// already validated the amount against the module's supply policy.
+func (k *Keeper) MintTo(addr string, amount int64) {
+	k.balances[addr] += amount
+}
+
 // Send applies a MsgSend to the keeper state.
 //
 // The prototype runs single-threaded, so the balance map is written directly

@@ -67,7 +67,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.REVIEW_BOT_TOKEN }}
           MODEL_SPEC: ${{ vars.MODEL_SPEC }}
           # ROSTER is an org variable, empty until T-0, when it is filled with
-          # attendee handles. Empty means codegenie allowlists no one.
+          # attendee handles. Behavior verified live: an empty ROSTER still
+          # lets ORG MEMBERS through (codegenie's permission check sees write
+          # access and runs anyway — a member-bypass fail-open); it gates only
+          # non-member external commenters, which is exactly the T-0 attendee
+          # population. Do not rely on it to gate members.
           ROSTER: ${{ vars.ROSTER }}
           # codegenie's github-action adapter routes a single key to the model
           # provider (openrouter here) via LLM_API_KEY.

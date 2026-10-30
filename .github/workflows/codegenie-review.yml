@@ -55,16 +55,29 @@ jobs:
           extraSkillPaths = ["$RUNNER_TEMP/skill-hub/standards/team-review-lens.md"]
           EOF
 
+      # Mint an installation token for the codegenie-dutralab GitHub App.
+      # The reviews post as codegenie-dutralab[bot] — a real bot identity,
+      # the same shape production review bots use (not the presenter's
+      # personal account). App comments DO fire issue_comment, so mergebot
+      # hears the status-comment edits.
+      - name: Mint codegenie app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.CODEGENIE_APP_ID }}
+          private-key: ${{ secrets.CODEGENIE_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Run codegenie review
         env:
-          # codegenie posts as the review-bot user via REVIEW_BOT_TOKEN (an org
-          # PAT), not as github-actions[bot]. That distinction matters: mergebot
-          # listens for issue_comment created *and* edited, and a comment edited
-          # in place by github-actions[bot] never fires a workflow, so the
-          # bot's own status-comment edits would not wake mergebot. A real user
-          # identity does fire issue_comment.
-          GH_TOKEN: ${{ secrets.REVIEW_BOT_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.REVIEW_BOT_TOKEN }}
+          # codegenie posts as codegenie-dutralab[bot] via the app
+          # installation token. That distinction matters: mergebot
+          # listens for issue_comment created *and* edited, and a comment
+          # edited in place by the auto GITHUB_TOKEN never fires a
+          # workflow, so the bot's own status-comment edits would not wake
+          # mergebot. App installation tokens DO fire issue_comment.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           MODEL_SPEC: ${{ vars.MODEL_SPEC }}
           # ROSTER is an org variable, empty until T-0, when it is filled with
           # attendee handles. Behavior verified live: an empty ROSTER still

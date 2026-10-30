@@ -33,15 +33,25 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # The merge runs as the same bot identity that posts the reviews
-      # (REVIEW_BOT_TOKEN). That is deliberate: a merge performed with the
+      # The merge runs as mergebot-dutralab[bot]: a GitHub App installation
+      # token minted per-step below (APP_TOKEN). A merge performed with the
       # auto GITHUB_TOKEN does not trigger downstream workflows (GitHub's
       # recursion prevention), so the post-merge beacon chain needs a real
-      # PAT, and real verdict-merging bots are one identity, not two.
-      MERGE_TOKEN: ${{ secrets.REVIEW_BOT_TOKEN }}
+      # identity; App tokens, like PATs, DO trigger them.
       REPO: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
+      # Mint the installation token for the mergebot-dutralab GitHub App.
+      # The merge is attributed to mergebot-dutralab[bot], not the
+      # presenter's personal account.
+      - name: Mint mergebot app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.MERGEBOT_APP_ID }}
+          private-key: ${{ secrets.MERGEBOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Resolve merge-gate mode
         id: mode
         env:
@@ -62,6 +72,7 @@ jobs:
       - name: "[vulnerable] Merge when the verdict substring is present"
         if: steps.mode.outputs.mode == 'vulnerable'
         env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
           # GitHub provides the association on the comment event itself
@@ -72,7 +83,7 @@ jobs:
           COMMENT_ASSOC: ${{ github.event.comment.author_association }}
         run: |
           set -e
-          export GH_TOKEN="${MERGE_TOKEN:-$GITHUB_TOKEN}"
+          export GH_TOKEN="${APP_TOKEN:-$GITHUB_TOKEN}"
           echo "[vulnerable] DELIBERATELY VULNERABLE: merge gate is a substring grep of the comment text"
           if ! printf '%s' "$COMMENT_BODY" | grep -qF "VERDICT: SAFE TO MERGE"; then
             echo "no verdict line; nothing to merge"
@@ -107,9 +118,11 @@ jobs:
       - name: "[hardened 0/4] Fetch the review status comment"
         id: status
         if: steps.mode.outputs.mode == 'hardened'
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          export GH_TOKEN="${MERGE_TOKEN:-$GITHUB_TOKEN}"
+          export GH_TOKEN="${APP_TOKEN:-$GITHUB_TOKEN}"
           # Every PR comment, then keep only those carrying the codegenie
           # status marker, and take the newest one by created_at.
           gh api --paginate "repos/$REPO/issues/$ISSUE_NUMBER/comments?per_page=100" \
@@ -169,9 +182,11 @@ jobs:
 
       - name: "[hardened 3/4] Reviewed commit must match the PR head"
         if: steps.mode.outputs.mode == 'hardened'
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          export GH_TOKEN="${MERGE_TOKEN:-$GITHUB_TOKEN}"
+          export GH_TOKEN="${APP_TOKEN:-$GITHUB_TOKEN}"
           # The reviewed head sha is the short sha in parentheses at the end of
           # the status comment's Git line, e.g. ... from main to branch (`9caf2026a9`).
           gitline="$(grep -i 'git:' /tmp/status.md | tail -n1 || true)"
@@ -190,9 +205,11 @@ jobs:
 
       - name: "[hardened 4/4] Merge (all controls passed)"
         if: steps.mode.outputs.mode == 'hardened'
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          export GH_TOKEN="${MERGE_TOKEN:-$GITHUB_TOKEN}"
+          export GH_TOKEN="${APP_TOKEN:-$GITHUB_TOKEN}"
           # Structural control: the merge is a controlled `gh pr merge`, and
           # every value checked above was parsed as data (env: + explicit
           # string compare) — never AI output interpolated into a shell

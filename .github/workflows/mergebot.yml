@@ -133,7 +133,8 @@ jobs:
         if: steps.mode.outputs.mode == 'hardened'
         env:
           # Read through env:, never interpolated into the shell (AI/API output
-          # is data). This is the "pass via env:, not ${{ }}" principle.
+          # is data). This is the "pass via env:, never expression
+          # interpolation" principle.
           ACTUAL: ${{ steps.status.outputs.author }}
           EXPECTED: ${{ vars.REVIEW_BOT_LOGIN }}
         run: |
@@ -177,6 +178,7 @@ jobs:
           # Structural control: the merge is a controlled `gh pr merge`, and
           # every value checked above was parsed as data (env: + explicit
           # string compare) — never AI output interpolated into a shell
-          # command. Treat AI output as untrusted; pass via env:, not ${{ }}.
+          # command. Treat AI output as untrusted; pass via env:, never
+          # expression interpolation of untrusted text).
           echo "[hardened 4/4] all controls passed; merging PR #$ISSUE_NUMBER"
           gh pr merge "$ISSUE_NUMBER" --repo "$REPO" --merge

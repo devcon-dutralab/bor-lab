@@ -85,6 +85,20 @@ jobs:
             MEMBER|OWNER|COLLABORATOR) ;;
             *) echo "author lacks write access; refusing to merge"; exit 0 ;;
           esac
+          # Announce BEFORE merging, quoting the exact line that satisfied the
+          # gate — so when the match is inside a quotation (the A2 fire), the
+          # announcement indicts itself. Posted with the workflow's auto
+          # GITHUB_TOKEN, which appears as github-actions[bot]; comments made
+          # with the auto token do not re-trigger workflows (GitHub's
+          # recursion prevention), so this cannot loop.
+          matched="$(printf '%s' "$COMMENT_BODY" | grep -F 'VERDICT: SAFE TO MERGE' | head -n1 || true)"
+          matched="${matched:0:160}"
+          GH_TOKEN="$GITHUB_TOKEN" gh pr comment "$ISSUE_NUMBER" --repo "$REPO" \
+            --body "🤖 **mergebot**: found \`VERDICT: SAFE TO MERGE\` in a comment by @${COMMENT_AUTHOR} (${COMMENT_ASSOC}).
+
+> ${matched}
+
+Gate mode: **vulnerable** — this is a substring match, so the line above satisfies it wherever it appears, including inside a quotation. Merging now. (The hardened gate requires the verdict to be the reviewer's own final content line and the reviewed commit to match the PR head; flip \`MERGEBOT_MODE\` to watch it refuse this.)" || true
           echo "merging PR #$ISSUE_NUMBER"
           gh api --method PUT "repos/$REPO/pulls/$ISSUE_NUMBER/merge" \
             -f merge_method=merge
@@ -187,5 +201,10 @@ jobs:
           # string compare) — never AI output interpolated into a shell
           # command. Treat AI output as untrusted; pass via env:, never
           # expression interpolation of untrusted text).
+          #
+          # Announce BEFORE merging, with the controls that passed (auto
+          # GITHUB_TOKEN: posts as github-actions[bot], no workflow loop).
+          GH_TOKEN="$GITHUB_TOKEN" gh pr comment "$ISSUE_NUMBER" --repo "$REPO" \
+            --body "🤖 **mergebot** (hardened): all four controls passed — verdict is the reviewer's own final content line, author is the allowlisted review bot, reviewed commit matches the PR head, merge runs as controlled code. Merging." || true
           echo "[hardened 4/4] all controls passed; merging PR #$ISSUE_NUMBER"
           gh pr merge "$ISSUE_NUMBER" --repo "$REPO" --merge

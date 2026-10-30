@@ -33,11 +33,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Auto GITHUB_TOKEN reads of another user's collaborator permission can be
-      # limited; BOT_TOKEN is a seeded PAT with repo scope that can query the
-      # collaborator permission API for any author. Fall back to the auto token
-      # if it is unset.
-      MERGE_TOKEN: ${{ secrets.BOT_TOKEN }}
+      # The merge runs as the same bot identity that posts the reviews
+      # (REVIEW_BOT_TOKEN). That is deliberate: a merge performed with the
+      # auto GITHUB_TOKEN does not trigger downstream workflows (GitHub's
+      # recursion prevention), so the post-merge beacon chain needs a real
+      # PAT, and real verdict-merging bots are one identity, not two.
+      MERGE_TOKEN: ${{ secrets.REVIEW_BOT_TOKEN }}
       REPO: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
@@ -63,6 +64,12 @@ jobs:
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
           COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          # GitHub provides the association on the comment event itself
+          # (MEMBER, OWNER, COLLABORATOR, CONTRIBUTOR, NONE); no extra API
+          # call or PAT is needed for the trust gate. (Forgejo lacked this
+          # field, which is why the old design queried the collaborator
+          # permission API with a seeded PAT.)
+          COMMENT_ASSOC: ${{ github.event.comment.author_association }}
         run: |
           set -e
           export GH_TOKEN="${MERGE_TOKEN:-$GITHUB_TOKEN}"
@@ -71,11 +78,11 @@ jobs:
             echo "no verdict line; nothing to merge"
             exit 0
           fi
-          # Trust gate: the comment author must currently have write access.
-          perm=$(gh api "repos/$REPO/collaborators/$COMMENT_AUTHOR/permission" --jq .permission)
-          echo "verdict author=$COMMENT_AUTHOR permission=$perm"
-          case "$perm" in
-            admin|write) ;;
+          # Trust gate: the comment author's association on this repo must
+          # imply write access. Parsed from the event payload via env:.
+          echo "verdict author=$COMMENT_AUTHOR association=$COMMENT_ASSOC"
+          case "$COMMENT_ASSOC" in
+            MEMBER|OWNER|COLLABORATOR) ;;
             *) echo "author lacks write access; refusing to merge"; exit 0 ;;
           esac
           echo "merging PR #$ISSUE_NUMBER"
